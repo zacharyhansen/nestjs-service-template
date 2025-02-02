@@ -1,0 +1,85 @@
+// Its integral to understand that models in this file are global - i.e they are the sum of records
+// across all tenant, orgs, and their env's. It should really only be things that are truly unique to our
+// entire business (like users, tenants, and their business units/env's)
+
+// !IMPORTANT: The web app should only ever access these models through views that are created in the specific schema
+// the web app is using
+
+/// Represents an entire customer (nothing higher than this)
+enum tenant {
+  /// This is the foundation tenant which only has system fields (no extensions at all) 
+  /// Its fields are used code generation (i.e. we only code features that have access to fields that exist for every tenant)
+  foundation
+
+  @@schema("auth")
+}
+
+/// All supported schemas. There can be 1 or more per organization of a tenant
+enum schema {
+  foundation
+  // example_customer_1_uat
+  // example_customer_1_prod
+  // example_customer_2_uat
+  // example_customer_2_prod
+
+  @@schema("auth")
+}
+
+/// Organization is synonymous with a business unit of a tenant (i.e. most customers will only have 1 but may have more per environment)
+model organization {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String        @db.VarChar(255)
+  tenant      tenant
+  external_id String?       @unique
+  created_at  DateTime      @default(now())
+  updated_at  DateTime      @updatedAt
+  /// Login is controlled at the organization level
+  clerk_id    String        @unique @db.VarChar(255)
+  environment environment[]
+
+  @@unique([tenant, name])
+  @@schema("auth")
+}
+
+/// This is synonymous to schema (1 env per schema). An organization may make user of multiple env's (uat and prod) that each have their own schema to store different data but they are
+/// the same exact structure.
+model environment {
+  /// the schema name in the database
+  schema           schema           @id
+  tenant           tenant
+  organization_id  String           @db.Uuid
+  environment_type environment_type @default(uat)
+  organization     organization     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant, organization_id, environment_type])
+  @@schema("auth")
+}
+
+model user {
+  clerk_id       String     @id @unique @db.VarChar(255)
+  external_id    String?    @unique
+  email          String     @unique @db.VarChar(255)
+  joined         DateTime   @default(now())
+  updated        DateTime   @updatedAt
+  address        String?
+  address_line_2 String?
+  city           String?    @db.VarChar(255)
+  zip            String?    @db.VarChar(255)
+  state          state_usa?
+  county         String?
+  name           String?
+  phone          String?    @db.VarChar(255)
+  ssn            String?    @db.VarChar(9)
+  date_of_birth  DateTime?  @db.Date
+  credit_score   Int?
+
+  environment_user   environment_user__foundation[]
+  form               form[]
+  form_version       form_version[]
+  form_instance      form_instance[]
+  dataview           dataview[]
+  published_datasets dataset[]                      @relation(name: "published")
+  created_datasets   dataset[]                      @relation(name: "created")
+
+  @@schema("auth")
+}

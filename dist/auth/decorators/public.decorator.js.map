@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../../src/auth/decorators/public.decorator.ts"],"sourcesContent":["import { SetMetadata } from '@nestjs/common';\n\n/** No authentication required */\nexport const Public = () => SetMetadata('public', true);\n"],"names":["SetMetadata","Public"],"mappings":"AAAA,SAASA,WAAW,QAAQ,iBAAiB;AAE7C,+BAA+B,GAC/B,OAAO,MAAMC,SAAS,IAAMD,YAAY,UAAU,MAAM"}

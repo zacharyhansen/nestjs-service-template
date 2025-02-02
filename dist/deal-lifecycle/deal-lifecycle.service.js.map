@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/deal-lifecycle/deal-lifecycle.service.ts"],"sourcesContent":["import { Injectable } from '@nestjs/common';\n\n@Injectable()\nexport class DealLifecycleService {}\n"],"names":["Injectable","DealLifecycleService"],"mappings":";;;;;;AAAA,SAASA,UAAU,QAAQ,iBAAiB;AAG5C,OAAO,MAAMC;AAAsB"}

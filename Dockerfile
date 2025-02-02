@@ -1,60 +1,32 @@
-FROM node:22-alpine3.20 AS base
+FROM bitnami/node:20.17.0 as development
 
-ENV DIR /app
-WORKDIR $DIR
-ARG NPM_TOKEN
+WORKDIR /usr/src/app
 
-FROM base AS dev
+COPY package.json ./
+COPY pnpm-lock.yaml ./
 
-ENV NODE_ENV=development
-ENV CI=true
+RUN pnpm install
 
-RUN npm install -g pnpm@9.14.2
+COPY . .
 
-COPY package.json pnpm-lock.yaml ./
+RUN pnpm run build
 
-RUN echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ".npmrc" && \
-    pnpm install --frozen-lockfile && \
-    rm -f .npmrc
+FROM bitnami/node:20.17.0 as production
 
-COPY tsconfig*.json .
-COPY .swcrc .
-COPY nest-cli.json .
-COPY src src
+ARG NODE_ENV=production
+ARG EnvironmentVariable
+ENV NODE_ENV=${NODE_ENV}
 
-EXPOSE $PORT
-CMD ["node", "--run", "dev"]
+WORKDIR /usr/src/app
 
-FROM base AS build
+COPY package.json ./
+COPY pnpm-lock.yaml ./
 
-ENV CI=true
+RUN pnpm install --production --ignore-scripts
 
-RUN apk update && apk add --no-cache dumb-init=1.2.5-r3 && npm install -g pnpm@9.14.2
+COPY . .
 
-COPY package.json pnpm-lock.yaml ./
-RUN echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ".npmrc" && \
-    pnpm install --frozen-lockfile && \
-    rm -f .npmrc
+COPY --from=development /usr/src/app/dist ./dist
 
-COPY tsconfig*.json .
-COPY .swcrc .
-COPY nest-cli.json .
-COPY src src
+CMD ["node", "dist/main.js"]
 
-RUN node --run build && \
-    pnpm prune --prod
-
-FROM base AS production
-
-ENV NODE_ENV=production
-ENV USER=node
-
-COPY --from=build /usr/bin/dumb-init /usr/bin/dumb-init
-COPY --from=build $DIR/package.json .
-COPY --from=build $DIR/pnpm-lock.yaml .
-COPY --from=build $DIR/node_modules node_modules
-COPY --from=build $DIR/dist dist
-
-USER $USER
-EXPOSE $PORT
-CMD ["dumb-init", "node", "dist/main.js"]

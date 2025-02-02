@@ -3,8 +3,13 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true,
     "builder": "swc",
-    "typeCheck": true
+    "typeCheck": true,
+    "deleteOutDir": true
+  },
+  "watchOptions": {
+    "watchExclude": [
+      "**/*.spec.ts"
+    ]
   }
 }

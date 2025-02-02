@@ -1,8 +1,12 @@
-*
-!/package.json
-!/pnpm-lock.yaml
-!/tsconfig.prod.json
-!/tsconfig.json
-!/.swcrc
-!/nest-cli.json
-!/src
+.git
+.github
+.vscode
+coverage
+docker-compose.yml
+reports
+README.md
+
+# Node Files #
+node_modules
+npm-debug.log
+npm-debug.log.*

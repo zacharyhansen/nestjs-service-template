@@ -1,0 +1,541 @@
+// Its integral to understand that models in this file are global - i.e they are the sum of records
+// across all tenants. All items in this schema represent configuration of a target schema and thus
+// should hold no "data" of the actual customer. 
+
+// Models that are config belong hee. A good rule of thumb is that if this the data should be shared 
+// across or be easily copied from / to for environments then it can live here.
+
+// !IMPORTANT: The web app should only ever access these models through views that are created in the specific schema
+// the web app is using. Every table should contain a schema enum
+
+model schematic {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  version    Int      @default(0)
+  schema     schema
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  definition Json
+
+  @@schema("configuration")
+}
+
+model role {
+  name   String
+  schema schema
+
+  role_view                    role_view[]
+  environment_user__foundation environment_user__foundation[]
+
+  @@id([schema, name])
+  @@schema("configuration")
+}
+
+enum view_type {
+  product
+  custom
+
+  @@schema("configuration")
+}
+
+// Custom views of data in a schema
+model view {
+  /// Name of the view in the DB schema (v_<schema>__<tableName> or vc_<schema>__<customViewName>)
+  name             String
+  type             view_type
+  schema           schema
+  /// name of the pg table in postgres this view references as the primary table (it PK is the PK of the view)
+  pg_primary_table String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  // postgrest properties
+  pgt_deletable    Boolean
+  pgt_description  String?
+  pgt_insertable   Boolean
+  pgt_is_view      Boolean
+  pgt_updatable    Boolean
+  pgt_pk_cols      String[]
+
+  column        column[]
+  role_column   role_column[]
+  role_view     role_view[]
+  link_source   link[]        @relation(name: "source")
+  link_target   link[]        @relation(name: "target")
+  link_junction link[]        @relation(name: "junction")
+
+  @@id([schema, name])
+  @@index([schema, name])
+  @@schema("configuration")
+}
+
+model column {
+  /// Name of the column in the view
+  name             String
+  schema           schema
+  created_at       DateTime               @default(now())
+  updated_at       DateTime               @updatedAt
+  view_name        String
+  // Table Config
+  cell_type        cell_type
+  // Form Config
+  field_type       field_type
+  // postgrest properties - for custom views we do our best to infer these
+  pgt_default      String?
+  pgt_description  String?
+  pgt_enum         String[]
+  pgt_max_len      Int?
+  pgt_name         String?
+  pgt_nominal_type String?
+  pgt_nullable     Boolean
+  pgt_type         String
+  // Inferred database attributes
+  data_type        supported_pg_data_type
+  is_pk            Boolean                @default(false)
+  oid              Int
+  is_updatable     Boolean                @default(false)
+  is_unique        Boolean                @default(false)
+  /// name of the pg table in postgres this view column references
+  pg_table         String?
+  /// name of the pg column in postgres this view column references
+  pg_column        String?
+  /// The id of the view or table in the database that this column is from
+  /// IMPORTANT: This is different than pg_table which is the root table if it exists
+  table_id         Int
+  /// The id of the column in the database from a view or table that this column is from
+  /// IMPORTANT: This is different than pg_column which is the root column if it exists
+  column_id        Int
+
+  view                 view          @relation(fields: [schema, view_name], references: [schema, name], onDelete: Cascade)
+  role_column          role_column[]
+  link_source          link[]        @relation(name: "source")
+  link_target          link[]        @relation(name: "target")
+  link_junction_target link[]        @relation(name: "junction_target")
+  link_junction_source link[]        @relation(name: "junction_source")
+
+  @@id([schema, view_name, name])
+  @@schema("configuration")
+}
+
+enum link_type {
+  M2O
+  O2M
+  M2M
+  O2O
+
+  @@schema("configuration")
+}
+
+model link {
+  type                        link_type
+  schema                      schema
+  /// Name of the contrainst index (this is what pgsrt expect for hints)
+  constraint                  String
+  pgt_columns                 String[]
+  source_view_name            String
+  source_column_name          String
+  target_view_name            String
+  target_column_name          String
+  // Meta data 
+  pgt_is_self                 Boolean
+  // fields if its M2M
+  constraint_2                String?
+  pgt_columns_2               String[]
+  junction_view_name          String?
+  junction_source_column_name String?
+  junction_target_column_name String?
+  // Configuration (not on role links)
+  display_name                String
+
+  view_source            view    @relation(name: "source", fields: [schema, source_view_name], references: [schema, name], onDelete: Cascade)
+  view_target            view    @relation(name: "target", fields: [schema, target_view_name], references: [schema, name], onDelete: Cascade)
+  column_target          column? @relation(name: "target", fields: [schema, target_view_name, target_column_name], references: [schema, view_name, name], onDelete: Cascade)
+  column_source          column? @relation(name: "source", fields: [schema, source_view_name, source_column_name], references: [schema, view_name, name], onDelete: Cascade)
+  junction_view          view?   @relation(name: "junction", fields: [schema, junction_view_name], references: [schema, name], onDelete: Cascade)
+  junction_column_source column? @relation(name: "junction_source", fields: [schema, junction_view_name, junction_source_column_name], references: [schema, view_name, name], onDelete: Cascade)
+  junction_column_target column? @relation(name: "junction_target", fields: [schema, junction_view_name, junction_target_column_name], references: [schema, view_name, name], onDelete: Cascade)
+
+  @@id([schema, source_view_name, source_column_name, target_view_name, target_column_name])
+  @@index([schema, source_view_name])
+  @@schema("configuration")
+}
+
+model role_view {
+  /// Name of the view in the DB schema (<view>__<role>)
+  name      String
+  schema    schema
+  role_name String
+  /// Name of the view from data-tree.ts that this view is created from
+  view_name String
+
+  view             view          @relation(fields: [schema, view_name], references: [schema, name], onDelete: Cascade)
+  role             role          @relation(fields: [schema, role_name], references: [schema, name], onDelete: Restrict)
+  role_column      role_column[]
+  dataview         dataview[]
+  source_role_link role_link[]   @relation(name: "source")
+  target_role_link role_link[]   @relation(name: "target")
+  role_link        role_link[]   @relation(name: "junction")
+
+  @@id([schema, name])
+  @@schema("configuration")
+}
+
+model role_column {
+  name           String
+  schema         schema
+  role_view_name String
+  view_name      String
+
+  role_view                 role_view         @relation(fields: [schema, role_view_name], references: [schema, name], onDelete: Cascade)
+  column                    column            @relation(fields: [schema, view_name, name], references: [schema, view_name, name], onDelete: Cascade)
+  view                      view              @relation(fields: [schema, view_name], references: [schema, name], onDelete: Cascade)
+  dataview_column           dataview_column[]
+  source_role_link          role_link[]       @relation(name: "source")
+  target_role_link          role_link[]       @relation(name: "target")
+  junction_source_role_link role_link[]       @relation(name: "junction_source")
+  junction_target_role_link role_link[]       @relation(name: "junction_target")
+
+  @@id([schema, role_view_name, name])
+  @@schema("configuration")
+}
+
+// NOTE: we do not relate these back to root views (no need for now)
+// and these links are there own real thing in the DB as it relates role views to each other
+// this is basically a copy of the link table
+model role_link {
+  type   link_type
+  schema schema
+  // root view references that this role link is based on
+  // source_view_name   String
+  // target_view_name   String
+  // junction_view_name String?
+
+  // role view link attributes
+  /// Name of the contrainst index (this is what pgsrt expect for hints)
+  constraint                  String
+  pgt_columns                 String[]
+  source_view_name            String
+  source_column_name          String
+  target_view_name            String
+  target_column_name          String
+  // Meta data 
+  pgt_is_self                 Boolean
+  // fields if its M2M
+  constraint_2                String?
+  pgt_columns_2               String[]
+  junction_view_name          String?
+  junction_source_column_name String?
+  junction_target_column_name String?
+  // Configuration (not on role links)
+  display_name                String
+
+  // root relations
+  // source_view   view  @relation(name: "role_link_source", fields: [schema, source_view_name], references: [schema, name], onDelete: Cascade)
+  // target_view   view  @relation(name: "role_link_target", fields: [schema, target_view_name], references: [schema, name], onDelete: Cascade)
+  // junction_view view? @relation(name: "role_link_junction", fields: [schema, junction_view_name], references: [schema, name], onDelete: Cascade)
+  // link          link  @relation(fields: [schema, source_view_name, source_column_name, target_view_name, target_column_name], references: [schema, source_view_name, source_column_name, target_view_name, target_column_name], onDelete: Cascade)
+
+  // role relations
+  source_role_view       role_view    @relation(name: "source", fields: [schema, source_view_name], references: [schema, name], onDelete: Cascade)
+  source_role_column     role_column  @relation(name: "source", fields: [schema, source_view_name, source_column_name], references: [schema, role_view_name, name], onDelete: Cascade)
+  target_role_view       role_view    @relation(name: "target", fields: [schema, target_view_name], references: [schema, name], onDelete: Cascade)
+  target_role_column     role_column  @relation(name: "target", fields: [schema, target_view_name, target_column_name], references: [schema, role_view_name, name], onDelete: Cascade)
+  junction_role_view     role_view?   @relation(name: "junction", fields: [schema, junction_view_name], references: [schema, name], onDelete: Cascade)
+  junction_column_source role_column? @relation(name: "junction_source", fields: [schema, junction_view_name, junction_source_column_name], references: [schema, role_view_name, name], onDelete: Cascade)
+  junction_column_target role_column? @relation(name: "junction_target", fields: [schema, junction_view_name, junction_target_column_name], references: [schema, role_view_name, name], onDelete: Cascade)
+
+  @@id([schema, source_view_name, source_column_name, target_view_name, target_column_name])
+  @@schema("configuration")
+}
+
+enum field_type {
+  // direct
+  text
+  combobox
+  checkbox
+  number
+  comboboxMulti
+  switch
+  password
+  textarea
+  datePicker
+  dateRangePicker
+  phone
+  tiptap
+  slider
+  // fk's
+  user
+
+  @@schema("configuration")
+}
+
+enum cell_type {
+  // direct
+  text
+  combobox
+  comboboxMulti
+  checkbox
+  switch
+  number
+  textarea
+  datePicker
+  phone
+  // fk to other records
+  user
+
+  @@schema("configuration")
+}
+
+model form {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  schema        schema
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  title         String?
+  tags          String[]
+  // relations
+  created_by_id String
+
+  versions   form_version[]
+  created_by user           @relation(fields: [created_by_id], references: [clerk_id], onDelete: Restrict)
+
+  @@index([schema, id])
+  @@schema("configuration")
+}
+
+model form_version {
+  id                  Int      @id @default(autoincrement())
+  schema              schema
+  version             Int
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+  is_latest_published Boolean  @default(false)
+  is_draft            Boolean  @default(false)
+  fields              field[]
+  // relations
+  form_id             String   @db.Uuid
+  created_by_id       String
+
+  created_by    user            @relation(fields: [created_by_id], references: [clerk_id], onDelete: Restrict)
+  form          form            @relation(fields: [form_id], references: [id], onDelete: Cascade)
+  form_instance form_instance[]
+
+  @@unique([schema, form_id, version])
+  @@index([schema, form_id, is_latest_published])
+  @@schema("configuration")
+}
+
+model field {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  schema          schema
+  name            String
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+  required        Boolean    @default(true)
+  field_type      field_type
+  name_locked     Boolean    @default(false)
+  label           String?
+  description     String?
+  placeholder     String?
+  default_value   String?
+  options         Json       @default("[]")
+  // relations
+  form_version_id Int
+
+  form_version form_version @relation(fields: [form_version_id], references: [id], onDelete: Cascade)
+
+  @@unique([schema, form_version_id, name])
+  @@index([schema, id])
+  @@schema("configuration")
+}
+
+model form_instance {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  schema          schema
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  content         String   @default("")
+  /// Should be follow the react hook form api for values of a from
+  values          Json     @default("{}")
+  // relations
+  form_id         String   @db.Uuid
+  form_version_id Int
+  created_by_id   String
+
+  created_by   user         @relation(fields: [created_by_id], references: [clerk_id], onDelete: Restrict)
+  form_version form_version @relation(fields: [form_version_id], references: [id], onDelete: Restrict)
+
+  @@index([schema, form_id, id])
+  @@schema("configuration")
+}
+
+model dataset {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  version         Int       @default(1)
+  published       Boolean   @default(false)
+  latest          Boolean   @default(true)
+  published_at    DateTime?
+  published_by_id String?
+  created_by_id   String
+  original_id     String?   @db.Uuid
+  created_at      DateTime  @default(now())
+  name            String
+  description     String?
+  query           String?
+  dataview_id     String?   @unique @db.Uuid
+  schema          schema
+
+  dataview         dataview?  @relation(name: "root", fields: [dataview_id], references: [id], onDelete: SetNull)
+  dataview_all     dataview[] @relation(name: "all")
+  original_dataset dataset?   @relation(name: "versions", fields: [original_id], references: [id], onDelete: Cascade)
+  dataset          dataset[]  @relation(name: "versions")
+  published_by     user?      @relation(name: "published", fields: [published_by_id], references: [clerk_id], onDelete: Restrict)
+  created_by       user       @relation(name: "created", fields: [created_by_id], references: [clerk_id], onDelete: Restrict)
+
+  @@unique([original_id, published, schema]) // Ensures only one published version per original dataset
+  @@unique([original_id, latest, schema]) // Ensures only one latest version per original dataset
+  @@index([original_id, published]) // For finding current published version
+  @@schema("configuration")
+}
+
+model dataview {
+  id                 String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dataset_id         String  @db.Uuid
+  role_view_name     String
+  constraint         String
+  schema             schema
+  parent_dataview_id String? @db.Uuid
+  created_by_id      String
+
+  dataview_column   dataview_column[]
+  parent_dataview   dataview?         @relation(name: "children", fields: [parent_dataview_id], references: [id], onDelete: Cascade)
+  children_dataview dataview[]        @relation(name: "children")
+  dataset           dataset           @relation(name: "all", fields: [dataset_id], references: [id], onDelete: Cascade)
+  dataset_root      dataset?          @relation(name: "root")
+  role_view         role_view         @relation(fields: [schema, role_view_name], references: [schema, name], onDelete: Cascade)
+  created_by        user              @relation(fields: [created_by_id], references: [clerk_id], onDelete: Restrict)
+
+  @@unique([dataset_id, parent_dataview_id, role_view_name, constraint]) // you cannot add the same table twice under a dataview for the same constraint
+  @@index([dataset_id])
+  @@schema("configuration")
+}
+
+model dataview_column {
+  dataview_id       String             @db.Uuid
+  role_column_name  String
+  role_view_name    String
+  schema            schema
+  // Shared component attributes
+  label             String?
+  // Table Attributes
+  ag_cell_data_type ag_cell_data_type? @default(text)
+  ag_width          Int                @default(200)
+  ag_minWidth       Int                @default(50)
+  ag_flex           Int?
+  ag_editable       Boolean            @default(false)
+  ag_resizable      Boolean            @default(true)
+  ag_pinned         ag_pinned?
+  order             Int                @default(0)
+  // Form Attributes
+  description       String?
+
+  dataview    dataview    @relation(fields: [dataview_id], references: [id], onDelete: Cascade)
+  role_column role_column @relation(fields: [schema, role_view_name, role_column_name], references: [schema, role_view_name, name], onDelete: Cascade)
+
+  @@id([dataview_id, role_view_name, role_column_name])
+  @@schema("configuration")
+}
+
+enum ag_cell_data_type {
+  text
+  percentage
+  usd
+  date
+  timestamp
+  user
+
+  @@schema("configuration")
+}
+
+enum ag_pinned {
+  left
+  right
+
+  @@schema("configuration")
+}
+
+enum supported_pg_data_type {
+  unknown
+
+  array_integer
+  array_json
+  array_jsonb
+  array_text
+  array_boolean
+  array_numeric
+  array_varchar
+  array_date
+  array_timestamp
+  bigint
+  bigserial
+  bit
+  bit_varying
+  boolean
+  box
+  bytea
+  character
+  character_varying
+  cidr
+  circle
+  date
+  double_precision
+  enum
+  float4
+  float8
+  inet
+  integer
+  interval
+  json
+  jsonb
+  line
+  lseg
+  macaddr
+  money
+  numeric
+  path
+  point
+  polygon
+  real
+  serial
+  smallint
+  smallserial
+  text
+  time
+  time_with_time_zone
+  timestamp
+  timestamp_with_time_zone
+  timestamp_without_time_zone
+  tsquery
+  tsvector
+  txid_snapshot
+  uuid
+  xml
+
+  @@schema("configuration")
+}
+
+// model table {
+//   dataset_id          String    @id @unique @db.Uuid
+//   schema              schema
+//   created_at          DateTime  @default(now())
+//   updated_at          DateTime  @updatedAt
+//   published_at        DateTime?
+//   published_by_id     String?   @db.Uuid
+//   title               String
+//   description         String?
+//   column_defs         Json?     @db.JsonB
+//   original_dataset_id String    @unique @db.Uuid
+
+//   dataset      dataset @relation(fields: [dataset_id], references: [id], onDelete: Cascade)
+//   published_by user?   @relation(fields: [published_by_id], references: [id], onDelete: Restrict)
+
+//   @@schema("configuration")
+// }
